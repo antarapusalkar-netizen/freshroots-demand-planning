@@ -1,0 +1,278 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Freshroots Demand Planning</title>
+<style>
+  :root { --bg: #f1e8d4; --panel: #f8f2e4; --ink: #111; --muted: #5b5648; --line: #cfc3a6; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  main { max-width: 1100px; margin: 0 auto; padding: 24px 16px 64px; }
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  h2 { font-size: 17px; margin: 28px 0 8px; }
+  h3 { font-size: 14px; margin: 18px 0 6px; text-transform: uppercase; letter-spacing: .04em; }
+  .muted { color: var(--muted); }
+  .bar { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+  .meta { display: flex; flex-wrap: wrap; gap: 6px 24px; background: var(--panel); border: 1px solid var(--line); padding: 10px 14px; }
+  .meta b { font-weight: 600; }
+  button { font: inherit; color: var(--ink); background: var(--panel); border: 1px solid var(--ink); padding: 5px 12px; cursor: pointer; }
+  button.primary { background: var(--ink); color: var(--panel); }
+  button:disabled { opacity: .5; cursor: default; }
+  .tabs { display: flex; gap: 4px; margin: 18px 0 0; border-bottom: 1px solid var(--ink); }
+  .tabs button { border-bottom: none; background: transparent; }
+  .tabs button.on { background: var(--ink); color: var(--panel); }
+  table { width: 100%; border-collapse: collapse; background: var(--panel); border: 1px solid var(--line); }
+  th, td { text-align: left; vertical-align: top; padding: 8px 10px; border-bottom: 1px solid var(--line); }
+  th { font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+  td.num { text-align: right; white-space: nowrap; }
+  .reason { max-width: 420px; }
+  .state { white-space: nowrap; }
+  .badge { display: inline-block; padding: 1px 8px; border: 1px solid var(--ink); font-size: 13px; }
+  .badge.ok { background: var(--ink); color: var(--panel); }
+  .form { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+  .form input { font: inherit; padding: 4px 6px; border: 1px solid var(--ink); background: #fff; }
+  .form input[type=number] { width: 90px; }
+  .form input[type=text] { width: 200px; }
+  .err { margin: 10px 0; padding: 8px 12px; border: 1px solid var(--ink); background: #e6c9c0; }
+  details { margin-top: 8px; }
+  details ul { margin: 6px 0 0; padding-left: 20px; }
+  .empty { padding: 14px; background: var(--panel); border: 1px solid var(--line); }
+  @media (max-width: 700px) { .reason { max-width: none; } th:nth-child(2), td:nth-child(2) { display: none; } }
+</style>
+</head>
+<body>
+<main>
+  <div class="bar">
+    <div>
+      <h1>Freshroots Demand Planning</h1>
+      <div class="muted">The system informs. People decide. Nothing here places an order.</div>
+    </div>
+    <div>
+      <button id="runNow" class="primary">Run now</button>
+      <div class="muted" style="margin-top:4px;font-size:13px">Automatic runs: Mondays and Thursdays, about 8:00 am IST</div>
+    </div>
+  </div>
+
+  <div id="error" class="err" hidden></div>
+  <div id="header"></div>
+
+  <div class="tabs">
+    <button id="tabReview" class="on">Review</button>
+    <button id="tabApproved">Approved list</button>
+  </div>
+
+  <section id="review"></section>
+  <section id="approved" hidden></section>
+</main>
+
+<script>
+const LABEL = { 'high-demand': 'High demand', 'stockout-risk': 'Stockout risk', 'overstock-risk': 'Overstock risk' };
+const ACTION = { 'reorder-now': 'Reorder now', 'pause-order': 'Pause next order' };
+let state = null;
+let openForm = null; // flag id whose override form is open
+
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const $ = (id) => document.getElementById(id);
+const flagLabel = (types) => types.map((t) => LABEL[t] || t).join(' + ');
+const fmtDate = (iso) => new Date(iso).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' });
+
+function showError(msg) {
+  $('error').hidden = !msg;
+  $('error').textContent = msg || '';
+}
+
+async function api(path, options) {
+  const res = await fetch(path, options);
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(body.error || `Request failed (${res.status})`);
+  return body;
+}
+
+async function load() {
+  showError('');
+  try {
+    state = await api('/api/flags');
+    render();
+    if (!$('approved').hidden) await renderApproved();
+  } catch (e) { showError(e.message); }
+}
+
+function renderHeader() {
+  if (!state.run) {
+    $('header').innerHTML = '<div class="empty">No run yet. Press <b>Run now</b> to check every SKU against the rules.</div>';
+    return;
+  }
+  const r = state.run;
+  const fest = r.festival_month === null ? 'unknown (month not in calendar)' : r.festival_month ? 'Yes' : 'No';
+  const settings = state.settings.map((s) => `<li>${esc(s.description)}: <b>${esc(s.value)}</b></li>`).join('');
+  $('header').innerHTML = `
+    <div class="meta">
+      <span>Run: <b>${esc(fmtDate(r.run_at))}</b> (${esc(r.triggered_by)})</span>
+      <span>Stock as of: <b>${esc(r.as_of_date || 'n/a')}</b></span>
+      <span>Festival month: <b>${esc(fest)}</b></span>
+      <span>SKUs checked: <b>${state.skus_checked}</b></span>
+      <span>No action: <b>${state.no_action_count}</b></span>
+      <span>${zohoLine()}</span>
+    </div>
+    <details><summary>Active assumptions</summary>
+      <ul>${settings}
+        <li>Perishable items (High) use the 3 and 4 week limits in place of the 6 and 14 week ones.</li>
+        <li>The festival uplift applies to both the 12-week average and the last 4 weeks, before any check.</li>
+        <li>The 12-week average is the last 12 weeks of sales, including the last 4.</li>
+        <li>Overstock together with stockout or high demand goes to exceptions.</li>
+        <li>Festival status comes from the month of the stock date, looked up in the calendar.</li>
+      </ul>
+    </details>`;
+}
+
+function stateCell(f) {
+  if (f.decision) {
+    const qty = f.decision === 'approved' ? f.recommended_qty : f.override_qty;
+    const qtyText = qty === null ? 'no quantity given' : `qty ${qty}`;
+    return `<span class="badge ok">${f.decision === 'approved' ? 'Approved' : 'Overridden'}</span>
+      <div class="muted">${esc(qtyText)}${f.note ? ' · ' + esc(f.note) : ''}</div>`;
+  }
+  return '<span class="muted">Not decided</span>';
+}
+
+function buttonsCell(f) {
+  if (openForm === f.id) {
+    return `<div class="form">
+      <input type="number" min="0" step="1" id="q${f.id}" placeholder="Quantity (optional)" value="${f.decision === 'overridden' && f.override_qty !== null ? f.override_qty : ''}">
+      <input type="text" id="n${f.id}" maxlength="500" placeholder="Note (optional)" value="${esc(f.note || '')}">
+      <button data-save="${f.id}" class="primary">Save override</button>
+      <button data-cancel="${f.id}">Cancel</button>
+    </div>`;
+  }
+  const approve = f.is_exception ? '' : `<button data-approve="${f.id}">Approve</button> `;
+  return `${approve}<button data-override="${f.id}">Override</button>`;
+}
+
+function rowHtml(f) {
+  const qty = f.recommended_qty === null ? '–' : f.recommended_qty;
+  return `<tr>
+    <td><b>${esc(f.sku_id)}</b></td>
+    <td>${esc(f.sku_name)}</td>
+    <td>${esc(f.recommended_action ? ACTION[f.recommended_action] : '–')}</td>
+    <td class="num">${esc(qty)}</td>
+    <td class="reason">${esc(f.rule_reason)}</td>
+    <td>${onOrderCell(f)}</td>
+    <td class="state">${stateCell(f)}</td>
+    <td>${buttonsCell(f)}</td>
+  </tr>`;
+}
+
+const HEAD = '<tr><th>SKU</th><th>Name</th><th>Action</th><th>Qty</th><th>Reason</th><th>Already on order</th><th>Decision</th><th></th></tr>';
+
+const ZOHO_TEXT = { not_connected: 'Zoho not connected', never_synced: 'Not synced yet', failed: 'Zoho sync failed' };
+
+function zohoLine() {
+  const z = state.zoho;
+  if (z.state === 'not_connected') return '<b>Zoho not connected</b>';
+  if (z.state === 'never_synced') return '<b>Zoho not synced yet</b> (press Run now)';
+  if (z.state === 'failed') {
+    const good = z.last_ok_at ? `, last good sync ${esc(fmtDate(z.last_ok_at))}` : '';
+    return `<b>Zoho sync failed</b>: ${esc(z.message || 'unknown error')}${good}`;
+  }
+  return `Zoho last synced <b>${esc(fmtDate(z.last_ok_at))}</b>`;
+}
+
+function onOrderCell(f) {
+  if (state.zoho.state !== 'ok') return `<span class="muted">${esc(ZOHO_TEXT[state.zoho.state])}</span>`;
+  if (!f.on_order.length) return '<span class="muted">None on order</span>';
+  return f.on_order.map((o) => {
+    const recv = o.quantity_received === null ? 'ordered' : `ordered, ${esc(o.quantity_received)} received`;
+    return `<div><b>${esc(o.quantity)}</b> ${recv}<br><span class="muted">${esc(o.po_number || 'no PO number')} · ${esc(o.status)} · due ${esc(o.expected_date || 'date not given')}</span></div>`;
+  }).join('');
+}
+
+function renderReview() {
+  if (!state.run) { $('review').innerHTML = ''; return; }
+  // Group by flag combination; groups in alphabetical order so no group reads as "first priority".
+  const groups = new Map();
+  for (const f of state.flagged) {
+    const key = flagLabel([...f.flag_types].sort());
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(f);
+  }
+  let html = '<h2>Flagged SKUs</h2>';
+  if (!groups.size) html += '<div class="empty">No SKU is flagged in this run.</div>';
+  for (const key of [...groups.keys()].sort()) {
+    html += `<h3>${esc(key)}</h3><table>${HEAD}${groups.get(key).map(rowHtml).join('')}</table>`;
+  }
+  html += '<h2>Exceptions</h2><div class="muted" style="margin-bottom:6px">The rules cannot decide these. Raghav decides, using Override.</div>';
+  html += state.exceptions.length
+    ? `<table>${HEAD}${state.exceptions.map(rowHtml).join('')}</table>`
+    : '<div class="empty">No exceptions in this run.</div>';
+  if (state.zoho.state === 'ok') {
+    html += '<h2>Unmatched Zoho orders</h2><div class="muted" style="margin-bottom:6px">Open order lines whose Zoho item SKU code does not equal any SKU ID. They are never guessed.</div>';
+    html += state.unmatched.length
+      ? `<table><tr><th>PO</th><th>Status</th><th>Zoho item ID</th><th>Qty</th><th>Due</th></tr>${state.unmatched.map((o) => `<tr><td>${esc(o.po_number || '–')}</td><td>${esc(o.status)}</td><td>${esc(o.item_ref || '–')}</td><td class="num">${esc(o.quantity)}</td><td>${esc(o.expected_date || '–')}</td></tr>`).join('')}</table>`
+      : '<div class="empty">None. Every open order line matched a SKU.</div>';
+  }
+  $('review').innerHTML = html;
+}
+
+function render() { renderHeader(); renderReview(); }
+
+async function renderApproved() {
+  try {
+    const data = await api('/api/approved');
+    let html = '<h2>Approved list for procurement</h2>';
+    if (!data.rows.length) {
+      html += '<div class="empty">Nothing approved yet in the latest run.</div>';
+    } else {
+      html += `<p><a href="/api/approved?format=csv"><button class="primary">Download CSV</button></a></p>
+        <table><tr><th>SKU</th><th>Name</th><th>Flags</th><th>Decision</th><th>Final qty</th><th>Note</th></tr>
+        ${data.rows.map((r) => `<tr><td><b>${esc(r.sku_id)}</b></td><td>${esc(r.sku_name)}</td><td>${esc(r.flags)}</td>
+          <td>${esc(r.decision)}</td><td class="num">${r.final_qty === null ? '–' : esc(r.final_qty)}</td><td>${esc(r.note || '')}</td></tr>`).join('')}</table>`;
+    }
+    $('approved').innerHTML = html;
+  } catch (e) { showError(e.message); }
+}
+
+async function decide(payload) {
+  showError('');
+  try {
+    await api('/api/decide', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+    openForm = null;
+    await load();
+  } catch (e) { showError(e.message); }
+}
+
+document.addEventListener('click', (ev) => {
+  const t = ev.target;
+  if (!(t instanceof HTMLElement)) return;
+  if (t.dataset.approve) decide({ flag_id: Number(t.dataset.approve), decision: 'approved' });
+  else if (t.dataset.override) { openForm = Number(t.dataset.override); renderReview(); }
+  else if (t.dataset.cancel) { openForm = null; renderReview(); }
+  else if (t.dataset.save) {
+    const id = Number(t.dataset.save);
+    decide({ flag_id: id, decision: 'overridden', override_qty: $('q' + id).value, note: $('n' + id).value });
+  }
+});
+
+$('runNow').addEventListener('click', async () => {
+  const b = $('runNow');
+  b.disabled = true; b.textContent = 'Running…';
+  showError('');
+  try { await api('/api/run', { method: 'POST' }); openForm = null; await load(); }
+  catch (e) { showError(e.message); }
+  b.disabled = false; b.textContent = 'Run now';
+});
+
+function tab(which) {
+  $('review').hidden = which !== 'review';
+  $('approved').hidden = which !== 'approved';
+  $('tabReview').classList.toggle('on', which === 'review');
+  $('tabApproved').classList.toggle('on', which === 'approved');
+  if (which === 'approved') renderApproved();
+}
+$('tabReview').addEventListener('click', () => tab('review'));
+$('tabApproved').addEventListener('click', () => tab('approved'));
+
+load();
+</script>
+</body>
+</html>

@@ -1,0 +1,18 @@
+{
+  "name": "freshroots-demand-planning",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node --env-file=.env scripts/dev.js",
+    "seed": "node --env-file=.env scripts/seed.js",
+    "test": "node --test tests/*.test.js"
+  },
+  "engines": {
+    "node": "22.x"
+  },
+  "dependencies": {
+    "csv-parse": "^5.6.0",
+    "pg": "^8.13.0"
+  }
+}
