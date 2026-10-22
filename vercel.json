@@ -1,9 +1,24 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "regions": ["sin1"],
+  "outputDirectory": "public",
+  "regions": [
+    "sin1"
+  ],
   "functions": {
-    "api/page.js": { "includeFiles": "views/**" }
+    "api/page.js": {
+      "includeFiles": "views/**"
+    }
   },
-  "rewrites": [{ "source": "/", "destination": "/api/page" }],
-  "crons": [{ "path": "/api/run", "schedule": "30 2 * * 1,4" }]
+  "rewrites": [
+    {
+      "source": "/",
+      "destination": "/api/page"
+    }
+  ],
+  "crons": [
+    {
+      "path": "/api/run",
+      "schedule": "30 2 * * 1,4"
+    }
+  ]
 }
