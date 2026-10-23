@@ -34,12 +34,9 @@ test('requirePassword: 401 with a Basic challenge when the password is wrong or 
   assert.equal(ok.statusCode, 200);
 });
 
-test('requirePassword: no password is allowed locally but refused on Vercel', () => {
+test('requirePassword: with no SITE_PASSWORD the site is open, locally and on Vercel', () => {
   assert.equal(requirePassword({ headers: {} }, fakeRes(), {}), true);
-  const res = fakeRes();
-  assert.equal(requirePassword({ headers: {} }, res, { VERCEL: '1' }), false);
-  assert.equal(res.statusCode, 503);
-  assert.match(res.body, /SITE_PASSWORD is not set/);
+  assert.equal(requirePassword({ headers: {} }, fakeRes(), { VERCEL: '1' }), true);
 });
 
 // The handlers must refuse before touching the database. Run with a password set and no DATABASE_URL.
