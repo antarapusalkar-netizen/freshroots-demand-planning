@@ -100,3 +100,15 @@ test('financial-year quarters run April to March and show their date range', () 
   assert.equal(quarterRange('Q3 2026'), null);
   assert.match(validateQuarter({ quarter: 'bad', lost_sales_inr: 1, writeoffs_inr: 1 }).errors[0], /financial year starts in April/);
 });
+
+test("the main page has a 'Deepa's dashboard' tab that redirects to her own page; her page links back", () => {
+  const main = readFileSync(new URL('../views/dashboard.html', import.meta.url), 'utf8');
+  const deepa = readFileSync(new URL('../views/deepa.html', import.meta.url), 'utf8');
+  assert.ok(main.includes('id="tabDeepa"'));
+  assert.ok(main.includes("location.href = '/deepa'"));
+  assert.ok(!main.includes('<iframe'), 'her page is not embedded');
+  assert.ok(main.includes('href="/deepa"'));
+  assert.ok(/<a href="\/"/.test(deepa));
+  // the main page never calls her APIs or shows her content, so her page stays a separate read-only page
+  assert.ok(!/api\/deepa|api\/distributors/.test(main));
+});

@@ -67,6 +67,7 @@
     <button id="tabApproved">Approved list</button>
     <button id="tabSkus">SKUs</button>
     <button id="tabUpload">Upload SAP files</button>
+    <button id="tabDeepa">Deepa's dashboard →</button>
   </div>
 
   <section id="review"></section>
@@ -293,6 +294,8 @@ $('tabReview').addEventListener('click', () => tab('review'));
 $('tabApproved').addEventListener('click', () => tab('approved'));
 $('tabSkus').addEventListener('click', () => tab('skus'));
 $('tabUpload').addEventListener('click', () => tab('upload'));
+// The tab is a link: it takes you to Deepa's own read-only page.
+$('tabDeepa').addEventListener('click', () => { location.href = '/deepa'; });
 
 // ---- SKUs ----
 let skuData = null;
