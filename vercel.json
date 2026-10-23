@@ -17,6 +17,14 @@
     {
       "source": "/deepa",
       "destination": "/api/page?view=deepa"
+    },
+    {
+      "source": "/deepa/",
+      "destination": "/api/page?view=deepa"
+    },
+    {
+      "source": "/deepa.html",
+      "destination": "/api/page?view=deepa"
     }
   ],
   "crons": [

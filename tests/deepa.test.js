@@ -77,3 +77,14 @@ test('the page route serves Deepa at ?view=deepa, the dashboard by default, and 
   assert.equal((await get('/api/page?view=../../.env')).statusCode, 404);
   assert.equal((await get('/api/page?view=constructor')).statusCode, 404);
 });
+
+test('the two dashboards link to each other, and every address for Deepa\'s page is routed', () => {
+  const main = readFileSync(new URL('../views/dashboard.html', import.meta.url), 'utf8');
+  const deepa = readFileSync(new URL('../views/deepa.html', import.meta.url), 'utf8');
+  assert.ok(main.includes('href="/deepa"'));
+  assert.ok(deepa.includes('href="/"'));
+  const rewrites = JSON.parse(readFileSync(new URL('../vercel.json', import.meta.url), 'utf8')).rewrites;
+  for (const src of ['/deepa', '/deepa/', '/deepa.html']) {
+    assert.ok(rewrites.some((r) => r.source === src && r.destination === '/api/page?view=deepa'), `${src} must be routed to Deepa's page`);
+  }
+});

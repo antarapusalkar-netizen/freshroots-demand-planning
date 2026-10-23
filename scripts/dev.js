@@ -7,8 +7,8 @@ const root = new URL('../', import.meta.url);
 createServer(async (req, res) => {
   const path = new URL(req.url, 'http://localhost').pathname;
   try {
-    if (path === '/' || path === '/deepa') {
-      if (path === '/deepa') req.url = '/api/page?view=deepa';
+    if (path === '/' || path === '/deepa' || path === '/deepa/' || path === '/deepa.html') {
+      if (path !== '/') req.url = '/api/page?view=deepa';
       await (await import(new URL('api/page.js', root))).default(req, res);
     } else if (/^\/api\/[a-z]+$/.test(path)) {
       const mod = await import(new URL(`api/${path.slice(5)}.js`, root));
