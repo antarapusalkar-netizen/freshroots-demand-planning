@@ -149,3 +149,9 @@ INSERT INTO app_settings (key, value, description) VALUES
   ('distributor_drop_pct', '30', 'Distributor watch: flag when the latest full month is this many percent or more below the average of the previous months (A10)'),
   ('distributor_baseline_months', '3', 'Distributor watch: how many previous months make the average (A10)')
 ON CONFLICT (key) DO NOTHING;
+
+-- Step 9: distributor monthly orders can be uploaded (units). Rows from a demo file are labelled
+-- illustrative so no screen can mistake them for Freshroots data.
+ALTER TABLE distributor_orders_monthly ADD COLUMN IF NOT EXISTS illustrative boolean NOT NULL DEFAULT false;
+ALTER TABLE data_uploads ADD COLUMN IF NOT EXISTS orders_rows integer NOT NULL DEFAULT 0;
+ALTER TABLE data_uploads ADD COLUMN IF NOT EXISTS illustrative boolean NOT NULL DEFAULT false;

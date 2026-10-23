@@ -2,7 +2,7 @@ import { withPool } from '../lib/db.js';
 import { requirePassword } from '../lib/auth.js';
 import {
   validateDistributorInput, listDistributorsFull, activeSkusByDistributor, createDistributor,
-  updateDistributor, setDistributorActive, regionCounts, loadWatchInputs,
+  updateDistributor, setDistributorActive, regionCounts, loadWatchInputs, orderRowCounts,
 } from '../lib/distributors.js';
 import { evaluateWatch, currentMonthIST } from '../lib/watch.js';
 import { safe, sendJson, readJson } from '../lib/http.js';
@@ -15,7 +15,7 @@ export default safe(async (req, res) => {
     const data = await withPool(async (pool) => {
       const distributors = await listDistributorsFull(pool);
       const watch = evaluateWatch({ distributors, ...(await loadWatchInputs(pool)), todayMonth: currentMonthIST() });
-      return { distributors, regions: regionCounts(distributors), watch };
+      return { distributors, regions: regionCounts(distributors), watch, order_rows: await orderRowCounts(pool) };
     });
     return sendJson(res, 200, data);
   }

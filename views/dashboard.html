@@ -125,7 +125,7 @@ function renderHeader() {
       <span>${zohoLine()}</span>
       <span>${uploadLine()}</span>
     </div>
-    <details><summary>Active assumptions</summary>
+    <details><summary>Active assumptions (to be confirmed with Raghav)</summary>
       <ul>${settings}
         <li>Perishable items (High) use the 3 and 4 week limits in place of the 6 and 14 week ones.</li>
         <li>The festival uplift applies to both the 12-week average and the last 4 weeks, before any check.</li>
@@ -193,7 +193,7 @@ function zohoLine() {
 function uploadLine() {
   const u = state.last_upload;
   if (!u) return 'Data source: <b>sample data (no SAP upload yet)</b>';
-  return `Last SAP upload: <b>${esc(fmtDate(u.uploaded_at))}</b> (${esc(u.sales_rows)} sales rows, ${esc(u.inventory_rows)} stock rows)`;
+  return `Last SAP upload: <b>${esc(fmtDate(u.uploaded_at))}</b> (${esc(u.sales_rows)} sales rows, ${esc(u.inventory_rows)} stock rows${u.orders_rows ? `, ${esc(u.orders_rows)} distributor-order rows${u.illustrative ? ' (illustrative demo data)' : ''}` : ''})`;
 }
 
 function onOrderCell(f) {
@@ -377,29 +377,42 @@ function renderUpload() {
   if (uploadBuilt) return;
   uploadBuilt = true;
   $('upload').innerHTML = `<h2>Upload SAP files</h2>
-    <p class="muted">Choose the export IT sent. Weekly sales are added or corrected by SKU and week. A stock file replaces the whole current stock snapshot. Check first; nothing is saved until you press Load. After loading, press Run now to check every SKU against the new data.</p>
+    <p class="muted">Choose the export IT sent. Weekly sales are added or corrected by SKU and week. A stock file replaces the whole current stock snapshot. Distributor orders are added or corrected by distributor and month, in units. Column names are to be confirmed with IT. Check first; nothing is saved until you press Load. After loading, press Run now to check every SKU against the new data.</p>
     <div class="form" style="flex-direction:column;align-items:flex-start;gap:10px">
       <label>Weekly sales CSV <input type="file" id="fSales" accept=".csv,text/csv"></label>
       <label>Current stock CSV <input type="file" id="fStock" accept=".csv,text/csv"></label>
+      <label>Distributor monthly orders CSV (units; columns Distributor_ID, Month, Order_Volume) <input type="file" id="fOrders" accept=".csv,text/csv"></label>
+      <label><input type="checkbox" id="fIll"> This orders file is <b>illustrative demo data</b>, not Freshroots data (it will be labelled on Deepa's page)</label>
       <label>Upload password <input type="password" id="fPw" autocomplete="off"></label>
-      <div><button id="btnCheck">Check files</button> <button id="btnLoad" class="primary" disabled>Load into app</button></div>
+      <div><button id="btnCheck">Check files</button> <button id="btnLoad" class="primary" disabled>Load into app</button> <button id="btnRemoveIll">Remove illustrative orders</button></div>
     </div>
     <div id="upResult" style="margin-top:12px"></div>`;
   const reset = () => { $('btnLoad').disabled = true; $('upResult').innerHTML = ''; };
-  for (const id of ['fSales', 'fStock', 'fPw']) $(id).addEventListener('input', reset);
+  for (const id of ['fSales', 'fStock', 'fOrders', 'fIll', 'fPw']) $(id).addEventListener('input', reset);
+  $('btnRemoveIll').addEventListener('click', removeIllustrative);
   $('btnCheck').addEventListener('click', () => uploadCall('check'));
   $('btnLoad').addEventListener('click', () => uploadCall('load'));
 }
 
+async function removeIllustrative() {
+  const out = $('upResult');
+  if (!window.confirm('Remove every distributor-order row that was uploaded labelled illustrative? Real order rows are not touched.')) return;
+  try {
+    const res = await fetch('/api/upload', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Upload-Password': $('fPw').value }, body: JSON.stringify({ mode: 'remove_illustrative' }) });
+    const body = await res.json().catch(() => ({}));
+    out.innerHTML = res.ok ? `<div class="empty">Removed <b>${esc(body.removed)}</b> illustrative order row(s).</div>` : `<div class="err">${esc(body.error || (body.errors || ['Failed']).join(' '))}</div>`;
+  } catch (e) { out.innerHTML = `<div class="err">${esc(e.message)}</div>`; }
+}
+
 async function uploadCall(mode) {
   const out = $('upResult');
-  const sales = $('fSales').files[0], stock = $('fStock').files[0];
+  const sales = $('fSales').files[0], stock = $('fStock').files[0], orders = $('fOrders').files[0];
   $('btnCheck').disabled = true; $('btnLoad').disabled = true;
   try {
     const res = await fetch('/api/upload', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'X-Upload-Password': $('fPw').value },
-      body: JSON.stringify({ mode, sales: sales ? await sales.text() : '', inventory: stock ? await stock.text() : '' }),
+      body: JSON.stringify({ mode, sales: sales ? await sales.text() : '', inventory: stock ? await stock.text() : '', orders: orders ? await orders.text() : '', illustrative: $('fIll').checked }),
     });
     const body = await res.json().catch(() => ({}));
     if (!res.ok) {
@@ -410,6 +423,7 @@ async function uploadCall(mode) {
     const s = body.summary, lines = [];
     if (s.sales_rows) lines.push(`Sales: <b>${s.sales_rows}</b> rows, weeks ${esc(s.weeks_from)} to ${esc(s.weeks_to)}: <b>${s.sales_new}</b> new, <b>${s.sales_corrected}</b> corrected.`);
     if (s.inventory_rows) lines.push(`Stock: <b>${s.inventory_rows}</b> rows as of ${esc(s.as_of_dates.join(', '))}. This replaces the current stock snapshot.`);
+    if (s.orders_rows) lines.push(`Distributor orders: <b>${s.orders_rows}</b> rows, months ${esc(s.orders_from)} to ${esc(s.orders_to)}: <b>${s.orders_new}</b> new, <b>${s.orders_corrected}</b> corrected. ${s.illustrative ? '<b>Labelled illustrative demo data, not Freshroots data.</b>' : 'Not labelled illustrative, so this is treated as real Freshroots data.'}`);
     if (s.skus_missing_stock.length) lines.push(`<b>No stock row for:</b> ${esc(s.skus_missing_stock.join(', '))}. These SKUs will go to exceptions as missing stock data.`);
     if (body.loaded) {
       out.innerHTML = `<div class="empty"><b>Loaded.</b><br>${lines.join('<br>')}<br>Press <b>Run now</b> to check every SKU against this data.</div>`;

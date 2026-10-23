@@ -273,4 +273,33 @@ Recorded so this file matches the code. Each item was built at the user's reques
 - **Watch (A10) details:** settings `distributor_drop_pct` (30) and `distributor_baseline_months` (3) live in `app_settings`. "Latest full month" is the latest month in `distributor_orders_monthly` before the current month in India time, so a month in progress is never used. Only active distributors are checked. A missing month is never treated as zero: a distributor without orders for the latest month and the months before it is listed as "not evaluated". Results are sorted by name and carry no score.
 - **`distributor_orders_monthly`** has no loader yet. The upload tab handles weekly sales and stock only. The table stays empty, and the watch shows "No distributor-level order data loaded yet". The measure (units or value) is whatever the SAP export uses; the watch only compares a distributor with its own earlier months.
 - **Review activity:** per run, lines to review, approved, overridden, not decided, and hours from the run to the first and last saved decision. A later change to a decision moves the last time. Totals only; no person is named.
-- **Quarterly results:** stored in rupees as typed, per quarter label such as `2026-Q3`. Entering the same quarter again replaces it.
+- **Quarterly results:** stored in rupees as typed. Quarters are **financial-year quarters, April to March**, labelled by the year the financial year starts: `2026-Q3` is Q3 of FY2026-27, Oct–Dec 2026, and `2026-Q4` is Jan–Mar 2027. The screen shows the date range next to every quarter. Entering the same quarter again replaces it.
+- **Distributor orders upload:** a third file in the Upload tab, columns `Distributor_ID, Month, Order_Volume` (month `2026-09`, whole units per month; the case says "monthly order volume"). Added or corrected by distributor and month, never deleted by an upload. Tick "illustrative demo data" to label a demo file: those rows are tagged, Deepa's Distributors tab shows a clear "Illustrative demo data, not Freshroots data" banner, and "Remove illustrative orders" deletes only tagged rows. No demo data is loaded, and none should be invented. Uploading real data for the same month replaces the tagged row and its label.
+
+## 17. Assumptions we would confirm with Raghav and Deepa
+
+Raghav and Deepa are people in the case, so they cannot be asked. These are the defaults the build uses, why, and who we would confirm each with. "Editable" means a number in a settings row that is changed in the database (Neon console) with no code change or redeploy. There is no settings screen yet. How an assumption works (for example "replaces" or "before the checks") is code, and changing it means a code change and updating the section 8 table.
+
+| # | Default used | Why | Confirm with | Editable without code |
+|---|---|---|---|---|
+| A1 | Perishable limits (3 and 4 weeks) **replace** the 6 and 14 week ones | Rule 5 gives tighter windows. Replacing is the reading where a perishable SKU can be understocked or overstocked without contradicting rules 2 and 3 | Raghav | The numbers: `perishable_min_weeks` 3, `perishable_max_weeks` 4. "Replace" is code |
+| A2 | The 25% festival uplift applies to the 12-week average and the last-4-week figure **before** any check | Rule 4 says "before checking". Applying it to both leaves the high-demand ratio unchanged and only lowers weeks of stock | Raghav | The number: `festival_uplift_pct` 25, and the festival months in the `calendar` table. Where it applies is code |
+| A3 | 12-week average = last 12 weeks of sales, including the last 4 | Rule 1 names both windows; including the last 4 is the plain reading | Raghav | `average_weeks` 12, `recent_weeks` 4 |
+| A4 | Stockout + high demand: reorder at 1.5x. Overstock with either: goes to exceptions | The first two agree (order more). Overstock says pause, which contradicts them, so a person decides | Raghav | The 1.5: `high_demand_multiplier`. The routing is code |
+| A5 | Standard quantity = `Standard_Reorder_Qty`: stockout 1x, overstock 0 | It is the only quantity in the data | Raghav, procurement | Per SKU on the SKUs page; the multipliers as above |
+| A6 | The month of the stock date decides festival status | The stock date is the date the figures describe | Raghav | Festival months in the `calendar` table. The rule is code |
+| A7 | Zoho lines match by item SKU code equal to `SKU_ID`; "on order" = Issued or Partially_Received | The only link that needs no guessing. Zoho's status list was not confirmed | Procurement | The statuses: `zoho_open_statuses` (text setting). Matching is code |
+| A8 | A new SKU goes to exceptions until it has 12 weeks of sales | No history to judge; the existing exception rule already sends such SKUs to a person | Raghav | `average_weeks` 12 |
+| A9 | SKUs and distributors are deactivated, never deleted; a distributor with active SKUs cannot be deactivated | Keeps history and past runs intact | Raghav, Deepa | Code |
+| A10 | Watch fires when the latest full month is 30% or more below the previous 3-month average; a missing month is "not evaluated" | The 30% comes from the Nashik example in the case. Three months smooths one-off months. A missing month is not zero, so nothing is invented | Deepa | `distributor_drop_pct` 30, `distributor_baseline_months` 3 (text settings in `app_settings`). Missing-month handling is code |
+
+Other defaults chosen on the user's decision: distributor orders are in **units**; quarters are **financial-year (April to March)**; access is open by choice, with a separate password on the upload.
+
+**Statements for the write-up**
+- Column names for all three uploads (sales, stock, distributor orders) are the sample file columns, to be confirmed with IT.
+- Nothing records who approved or overrode a line. A decision stores only the time.
+- Zoho is built read-only and tested with mocked responses. A live link needs the client's own Zoho account; Freshroots' Zoho is fictional. A Zoho trial with a few items and one open order would give live proof if wanted.
+- The sample data has no distributor orders, so the watch stays empty. If a demo file is loaded for a presentation it must be uploaded with the illustrative label.
+- The system never places an order and never writes to Zoho.
+
+**Deliberately skipped:** draft purchase orders in Zoho, a run-history view on Raghav's page, per-person logins, and a separate Neon dev branch.

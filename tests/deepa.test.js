@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { runOverview } from '../lib/deepa.js';
-import { validateQuarter, saveQuarter, listQuarters } from '../lib/quarterly.js';
+import { validateQuarter, saveQuarter, listQuarters, quarterRange } from '../lib/quarterly.js';
 import page from '../api/page.js';
 
 function fakeRes() {
@@ -87,4 +87,16 @@ test('the two dashboards link to each other, and every address for Deepa\'s page
   for (const src of ['/deepa', '/deepa/', '/deepa.html']) {
     assert.ok(rewrites.some((r) => r.source === src && r.destination === '/api/page?view=deepa'), `${src} must be routed to Deepa's page`);
   }
+});
+
+test('financial-year quarters run April to March and show their date range', () => {
+  assert.deepEqual(quarterRange('2026-Q1'), { fy: 'FY2026-27', quarter_no: 1, range: 'Apr–Jun 2026', label: 'Q1 FY2026-27 · Apr–Jun 2026' });
+  assert.equal(quarterRange('2026-Q2').range, 'Jul–Sep 2026');
+  assert.equal(quarterRange('2026-Q3').range, 'Oct–Dec 2026');       // the example: Q3 of FY2026-27
+  assert.equal(quarterRange('2026-Q4').range, 'Jan–Mar 2027');       // Q4 falls in the next calendar year
+  assert.equal(quarterRange('2026-Q4').fy, 'FY2026-27');
+  assert.equal(quarterRange('2099-Q4').fy, 'FY2099-00');
+  assert.equal(quarterRange('2026-Q5'), null);
+  assert.equal(quarterRange('Q3 2026'), null);
+  assert.match(validateQuarter({ quarter: 'bad', lost_sales_inr: 1, writeoffs_inr: 1 }).errors[0], /financial year starts in April/);
 });
