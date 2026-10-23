@@ -8,6 +8,10 @@ A small web app that applies Raghav Kulkarni's five documented forecasting rules
 
 **The system informs. People decide.** The app never places an order, never makes the final call, and never ranks SKUs or people.
 
+### Who is who (from CLAUDE_ADDENDUM.md)
+
+Deepa Nair (Head of Operations) is the project sponsor. She gets her own **read-only dashboard**. She does not approve flags. Raghav and the procurement team do.
+
 ## 2. Case facts the build must respect
 
 - Freshroots: FMCG distributor, Maharashtra and Goa. Budget ₹15 lakhs, 90 days, no AI team.
@@ -26,6 +30,9 @@ A small web app that applies Raghav Kulkarni's five documented forecasting rules
 5. Zoho Inventory **read-only** link: pull open purchase orders into Neon and show "already on order" next to each flag on the review screen.
 6. OpenAI layer that writes a plain-language reason for each flag and exception (layer).
 7. Twice-weekly Cron run and GitHub to Vercel deploy.
+8. SKU page on Raghav's dashboard (add, edit, deactivate, reactivate SKUs). *(addendum)*
+9. Deepa's read-only dashboard (run history, review totals, quarterly numbers form). *(addendum)*
+10. A Distributors tab on Deepa's dashboard (list, add, edit, deactivate, and an "ordering less" watch). *(addendum)*
 
 **Do not build**
 - Automatic order placing, or writing anything to Zoho (create, update or delete). The Zoho link is read-only.
@@ -33,6 +40,9 @@ A small web app that applies Raghav Kulkarni's five documented forecasting rules
 - Forecasting for new launches or one-off events (these go to the exceptions list).
 - Ranking or scoring of SKUs, distributors or people. Sort by SKU ID and group by flag type.
 - Distributor Service (WhatsApp) or Operations Intelligence. They failed the Nine Checks and are out of scope.
+- Predicting which distributors will leave. The watch only reports a drop that already happened. *(addendum)*
+- Ranking or scoring of distributors. Sort distributors by name. *(addendum)*
+- A login system (unless the user asks). The two dashboards are separate pages. *(addendum)*
 - Anything not listed above.
 
 ## 4. Stack
@@ -70,6 +80,13 @@ All five files join cleanly (every SKU and distributor ID matches). Validate on 
 - `flags`: `id, run_id, sku_id, flag_types (list), recommended_action, recommended_qty, rule_reason (text), ai_reason (text, nullable), is_exception (bool)`.
 - `decisions`: `flag_id, decision (approved | overridden), override_qty (nullable), note (nullable), decided_at`.
 
+Additions from CLAUDE_ADDENDUM.md:
+- `skus` and `distributors` get an `active` flag (default true). Nothing is ever hard-deleted.
+- `distributor_orders_monthly`: `distributor_id, month, order_volume`. The measure (units or value) comes from the SAP export. Ask before assuming. Empty until that file is loaded.
+- `quarterly_results`: `quarter, lost_sales_inr, writeoffs_inr, entered_at`. Typed in by Deepa from her own records.
+
+Tables and columns added during the build are listed in section 16.
+
 ## 7. The rules (exactly as Raghav documented them)
 
 1. If an SKU's sales in the last 4 weeks are more than 20% above its 12-week average, flag **high-demand** and recommend a reorder at **1.5x** the standard quantity.
@@ -91,6 +108,9 @@ These are defaults so the build can start. Keep each one as a named setting so i
 | A5 | What is the "standard quantity"? | `Standard_Reorder_Qty` from the SKU file. Stockout risk recommends one standard quantity; overstock recommends 0 (pause) |
 | A6 | Which month decides festival status? | The month of `As_Of_Date` from the inventory data, looked up in the Calendar file |
 | A7 | How are Zoho order lines matched to our SKUs? | By the Zoho item's SKU code equal to `SKU_ID`. Lines that don't match go to a separate "unmatched orders" list. Never guess a match |
+| A8 | What happens to a newly added SKU? | It goes to the exceptions list until it has 12 weeks of sales (the existing exception rule). It gets no flag before that |
+| A9 | What does "remove" mean for SKUs and distributors? | Deactivate, never delete. New runs skip inactive SKUs. A distributor with active SKUs cannot be deactivated until those SKUs are reassigned |
+| A10 | When does the distributor watch fire? | When a distributor's latest full month of orders is 30% or more below the average of the previous 3 months. The 30% comes from the Nashik example in the case. Deepa confirms the number. It reports what happened and never predicts or scores |
 
 **Open purchase orders never change the rules.** Raghav's five rules do not mention stock on order, so flags and quantities are calculated exactly as above. On-order quantities are shown beside each flag so Raghav and procurement can see them.
 
@@ -138,6 +158,23 @@ If the assumptions change, update this table with the new expected results.
 - A **Run now** button next to the Cron schedule.
 - Clean, plain design: beige background, black text.
 
+## 10a. SKU page (on Raghav's dashboard) *(addendum)*
+
+List all SKUs (active and inactive). Add or edit a SKU: ID, name, category, perishable or not, standard reorder quantity, unit, distributor. Deactivate or reactivate (A9). A new SKU follows A8.
+
+## 10b. Deepa's dashboard (separate read-only page) *(addendum)*
+
+The addendum names the page `deepa.html`. See section 16 for how pages are served in the repo. No approve or override buttons. She sees:
+- **Run history:** date of each run, number of flags by type, number of exceptions.
+- **Review activity:** how many lines were approved or overridden per run, and the time from run to decisions. Totals only. Never show or rank individual people.
+- **Quarterly results:** a small form where she types the quarter's lost sales and write-offs (₹) from her own records, shown against the case baseline of ₹28-34L per quarter. Show only what she has typed, never a made-up figure.
+- **Active rules and assumptions:** read-only.
+- **Distributors tab:**
+  - List all distributors (name, region, status), with a count per region.
+  - Add, edit, deactivate or reactivate (A9). Fields: ID, name, region, status.
+  - **Ordering-less watch (A10):** list distributors whose latest month is 30% or more below their previous 3-month average. Sort by name. No scores, no ranking. If `distributor_orders_monthly` is empty, show "No distributor-level order data loaded yet" and nothing else.
+  - Reference text only: onboarding a new distributor costs about ₹1.5-2L and an average active distributor brings ₹18-25L a year (from the case). The tab never recommends adding or losing a distributor. That is Deepa's decision.
+
 ## 11. Triggers
 
 - Vercel Cron calls the run endpoint twice a week. Put the schedule in `vercel.json` (Vercel Cron uses UTC). The endpoint must check `CRON_SECRET`.
@@ -171,6 +208,8 @@ CLAUDE.md
 
 Keep `rules.js` free of database and network code so it can be tested on its own.
 
+Current layout as built (the tree above is the original suggestion, kept for reference): `views/dashboard.html` replaces `index.html` and is served by `api/page.js` through a rewrite in `vercel.json`; only `public/` is served as static files. Extra files: `api/page.js`, `api/skus.js`, `api/upload.js`, `api/deepa.js`, `api/distributors.js`, `lib/skus.js`, `lib/watch.js`, `lib/distributors.js`, `lib/quarterly.js`, `lib/deepa.js`, `views/deepa.html`, `lib/auth.js`, `lib/csv.js`, `lib/decisions.js`, `lib/explain-prompt.js`, `lib/http.js`, `lib/orders.js`, `lib/settings.js`, `lib/sql.js`, `lib/upload.js`, `lib/validate.js`, `lib/zoho-config.js`, `scripts/dev.js`, `scripts/schema.sql`, `public/robots.txt`, and tests `api`, `auth`, `deepa`, `distributors`, `explain`, `rules`, `skus`, `upload`, `validate`, `watch`, `zoho`.
+
 ## 13. Build order (core first, then layers)
 
 Finish and confirm each step before starting the next.
@@ -181,6 +220,8 @@ Finish and confirm each step before starting the next.
 4. **Zoho read-only link:** `lib/zoho.js`, the two tables, the matching rule (A7), and the extra review-screen column. *Done when* the app runs with no Zoho variables and shows "Zoho not connected", tests with mocked Zoho responses pass, and (only if the user supplies credentials) a live sync pulls real open purchase orders. Never invent purchase orders to make the screen look full.
 5. **OpenAI layer:** reasons on each flag and exception, with the fallback. *Done when* turning the API key off still gives a working app.
 6. **Cron + deploy:** push to GitHub, Vercel auto-deploys, schedule set. *Done when* the live URL runs on schedule and on **Run now**.
+7. **SKU page** *(addendum step A).* *Done when* Raghav can add a SKU (it lands in exceptions), edit it, deactivate it (the next run skips it) and reactivate it, with tests.
+8. **Deepa's dashboard + Distributors tab** *(addendum step B).* *Done when* the page works on the sample data, shows "No distributor-level order data loaded yet" when that table is empty, and a test using clearly labelled test rows (never shown in the real screen) proves the 30% rule fires only when it should.
 
 ## 14. Rules for working in this repo
 
@@ -196,3 +237,40 @@ Finish and confirm each step before starting the next.
 - There is no history of Raghav's past recommendations, so the planned check (rules matching his recommendations on roughly 80% of cases) cannot be run on this data. The kill criterion is applied by having Raghav review real output.
 - The 15-20% judgment cases stay with Raghav by design.
 - The seed data has no purchase orders and the case does not confirm Zoho API access. Unless the user supplies a Zoho account and credentials, the Zoho link is built and tested only with mocked responses, and the screen says "Zoho not connected".
+- The sample data has no distributor-level orders, so the watch can only be tested with labelled test rows until the real SAP export is loaded. *(addendum)*
+- The quarterly results are only what Deepa types in. *(addendum)*
+- Any login or access protection is the user's decision. State clearly what is and isn't protected. *(addendum)*
+
+## 16. Added during the build (not in the original spec)
+
+Recorded so this file matches the code. Each item was built at the user's request or as a safety measure, and any of them can be changed.
+
+**Features**
+- **SAP file upload:** an Upload tab (`api/upload.js`, `lib/upload.js`, table `data_uploads`). Weekly sales and/or current stock CSVs are validated; "Check" previews, "Load" saves. Sales are added or corrected by SKU and week. A stock file replaces the whole stock snapshot. Section 11 calls an upload "a later step".
+- **Access codes:** `UPLOAD_PASSWORD` (required for the upload; with none set, uploads are refused). `SITE_PASSWORD` (optional shared password for the whole site; currently not set, so the site is open). A scheduled run (GET `/api/run`) needs `CRON_SECRET`. A manual run (POST) is open unless `SITE_PASSWORD` is set. Section 4 says "no auth system"; this is the exception.
+- **Duplicate-cron guard:** a scheduled run is skipped if a run happened in the last 60 minutes, because Vercel can deliver a cron twice and a second run would hide decisions already made.
+- **Page serving:** `api/page.js` serves `views/dashboard.html`; `vercel.json` rewrites `/` to it, sets `outputDirectory` to `public`, region `sin1`, and the cron `30 2 * * 1,4` (Monday and Thursday, 02:30 UTC, about 8:00 am IST).
+- **OpenAI layer:** model `gpt-4.1-mini` (`OPENAI_MODEL`). One call per flagged or exception line, four at a time, 20 second timeout. An explanation containing a number not in the input record is discarded. The page shows the AI sentence with the rule's calculation underneath.
+- **CSV handling:** line endings CRLF, LF and CR are all accepted, even mixed. The approved-list CSV prefixes cells that start with `=`, `+`, `-` or `@` so spreadsheets do not run them.
+
+**Tables and columns added**
+- `flags` also stores one row per SKU with no action (empty `flag_types`, not an exception), so counts stay honest.
+- `purchase_orders` adds `line_item_id` (part of the key) and `quantity_received`.
+- `runs.festival_month` can be empty when the stock month is not in the calendar.
+- `app_settings` (editable text settings, currently `zoho_open_statuses`) and `data_uploads`.
+
+**Assumptions not listed above**
+- "On order" means a Zoho status of Issued or Partially_Received (setting `zoho_open_statuses`). The sync log records every status seen.
+- If the stock month is not in the calendar, every SKU goes to exceptions.
+- The as-of date is the latest `As_Of_Date` across inventory rows. The last 12 rows of sales are used without checking that the weeks are consecutive.
+- A high-demand flag on its own recommends 1.5x the standard quantity, rounded to whole units.
+- Environment variables added: `SITE_PASSWORD`, `UPLOAD_PASSWORD`.
+
+**SKU page and Deepa's dashboard: how they were built (steps 7 and 8)**
+- **Pages:** the SKU page is a tab on Raghav's dashboard. Deepa's page is `views/deepa.html`, served at `/deepa` through `api/page.js` (`vercel.json` rewrites `/deepa` to `/api/page?view=deepa`) instead of a root `deepa.html`. `/` and `/deepa` are separate pages. Both go through the same access check as everything else.
+- **"Read-only" means no approvals.** Deepa's page has no approve, override, run, upload or SKU controls. It does let her type quarterly results and add, edit, deactivate and reactivate distributors, so it writes to those tables.
+- **Distributors:** `status` stays as SAP's own text; `active` is the app's switch (A9). Deactivating a distributor with active SKUs is refused and the SKUs are named. SKUs can only be assigned to active distributors, and a SKU cannot be reactivated while its distributor is inactive.
+- **Watch (A10) details:** settings `distributor_drop_pct` (30) and `distributor_baseline_months` (3) live in `app_settings`. "Latest full month" is the latest month in `distributor_orders_monthly` before the current month in India time, so a month in progress is never used. Only active distributors are checked. A missing month is never treated as zero: a distributor without orders for the latest month and the months before it is listed as "not evaluated". Results are sorted by name and carry no score.
+- **`distributor_orders_monthly`** has no loader yet. The upload tab handles weekly sales and stock only. The table stays empty, and the watch shows "No distributor-level order data loaded yet". The measure (units or value) is whatever the SAP export uses; the watch only compares a distributor with its own earlier months.
+- **Review activity:** per run, lines to review, approved, overridden, not decided, and hours from the run to the first and last saved decision. A later change to a decision moves the last time. Totals only; no person is named.
+- **Quarterly results:** stored in rupees as typed, per quarter label such as `2026-Q3`. Entering the same quarter again replaces it.

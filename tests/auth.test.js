@@ -2,6 +2,9 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { passwordOk, requirePassword, requireUploadPassword } from '../lib/auth.js';
 import upload from '../api/upload.js';
+import skusApi from '../api/skus.js';
+import deepaApi from '../api/deepa.js';
+import distApi from '../api/distributors.js';
 import flags from '../api/flags.js';
 import decide from '../api/decide.js';
 import approved from '../api/approved.js';
@@ -47,7 +50,7 @@ async function withEnv(vars, fn) {
   try { return await fn(); } finally { for (const k of Object.keys(saved)) { if (saved[k] === undefined) delete process.env[k]; else process.env[k] = saved[k]; } }
 }
 
-for (const [name, handler, method] of [['flags', flags, 'GET'], ['approved', approved, 'GET'], ['decide', decide, 'POST'], ['page', page, 'GET'], ['run (manual)', run, 'POST']]) {
+for (const [name, handler, method] of [['flags', flags, 'GET'], ['approved', approved, 'GET'], ['decide', decide, 'POST'], ['page', page, 'GET'], ['run (manual)', run, 'POST'], ['skus (list)', skusApi, 'GET'], ['skus (change)', skusApi, 'POST'], ['deepa (view)', deepaApi, 'GET'], ['deepa (save)', deepaApi, 'POST'], ['distributors (list)', distApi, 'GET'], ['distributors (change)', distApi, 'POST']]) {
   test(`${name}: 401 without the password, even with no database configured`, async () => {
     await withEnv({ SITE_PASSWORD: 'pw', DATABASE_URL: undefined, CRON_SECRET: 'cs' }, async () => {
       const res = fakeRes();

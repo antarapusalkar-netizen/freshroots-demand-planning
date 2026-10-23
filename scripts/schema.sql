@@ -119,3 +119,33 @@ CREATE TABLE IF NOT EXISTS data_uploads (
   sales_new      integer NOT NULL,
   inventory_rows integer NOT NULL
 );
+
+-- Step 7: SKUs are deactivated, never deleted (A9). New runs skip inactive SKUs.
+ALTER TABLE skus ADD COLUMN IF NOT EXISTS active boolean NOT NULL DEFAULT true;
+
+-- Step 8: Deepa's dashboard and the Distributors tab.
+-- Distributors are deactivated, never deleted (A9). The status column stays as SAP's text.
+ALTER TABLE distributors ADD COLUMN IF NOT EXISTS active boolean NOT NULL DEFAULT true;
+
+-- One row per distributor per month. The measure (units or value) comes from the SAP export.
+-- Empty until that file is loaded; nothing is ever made up to fill it.
+CREATE TABLE IF NOT EXISTS distributor_orders_monthly (
+  distributor_id text NOT NULL REFERENCES distributors (distributor_id),
+  month          text NOT NULL CHECK (month ~ '^\d{4}-\d{2}$'),
+  order_volume   numeric NOT NULL CHECK (order_volume >= 0),
+  PRIMARY KEY (distributor_id, month)
+);
+
+-- Typed in by Deepa from her own records.
+CREATE TABLE IF NOT EXISTS quarterly_results (
+  quarter        text PRIMARY KEY CHECK (quarter ~ '^\d{4}-Q[1-4]$'),
+  lost_sales_inr numeric(14, 2) NOT NULL CHECK (lost_sales_inr >= 0),
+  writeoffs_inr  numeric(14, 2) NOT NULL CHECK (writeoffs_inr >= 0),
+  entered_at     timestamptz NOT NULL DEFAULT now()
+);
+
+-- A10: the distributor watch settings, kept as text settings. Deepa confirms the 30.
+INSERT INTO app_settings (key, value, description) VALUES
+  ('distributor_drop_pct', '30', 'Distributor watch: flag when the latest full month is this many percent or more below the average of the previous months (A10)'),
+  ('distributor_baseline_months', '3', 'Distributor watch: how many previous months make the average (A10)')
+ON CONFLICT (key) DO NOTHING;

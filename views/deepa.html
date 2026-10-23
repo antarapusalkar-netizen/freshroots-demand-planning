@@ -1,0 +1,239 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Freshroots: Deepa's dashboard</title>
+<style>
+  :root { --bg: #f1e8d4; --panel: #f8f2e4; --ink: #111; --muted: #5b5648; --line: #cfc3a6; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  main { max-width: 1100px; margin: 0 auto; padding: 24px 16px 64px; }
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  h2 { font-size: 17px; margin: 28px 0 8px; }
+  .muted { color: var(--muted); }
+  .small { font-size: 13px; }
+  button { font: inherit; color: var(--ink); background: var(--panel); border: 1px solid var(--ink); padding: 5px 12px; cursor: pointer; }
+  button.primary { background: var(--ink); color: var(--panel); }
+  .tabs { display: flex; gap: 4px; margin: 18px 0 0; border-bottom: 1px solid var(--ink); }
+  .tabs button { border-bottom: none; background: transparent; }
+  .tabs button.on { background: var(--ink); color: var(--panel); }
+  .wrap { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; background: var(--panel); border: 1px solid var(--line); }
+  th, td { text-align: left; vertical-align: top; padding: 7px 9px; border-bottom: 1px solid var(--line); }
+  th { font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+  td.num, th.num { text-align: right; white-space: nowrap; }
+  tr.inactive td { color: var(--muted); }
+  .badge { display: inline-block; padding: 1px 8px; border: 1px solid var(--ink); font-size: 13px; }
+  .badge.ok { background: var(--ink); color: var(--panel); }
+  .empty { padding: 14px; background: var(--panel); border: 1px solid var(--line); }
+  .err { margin: 10px 0; padding: 8px 12px; border: 1px solid var(--ink); background: #e6c9c0; }
+  .form { background: var(--panel); border: 1px solid var(--line); padding: 12px 14px; margin: 12px 0; }
+  .form label { display: block; margin: 6px 0 2px; font-size: 13px; color: var(--muted); }
+  .form input, .form select { font: inherit; padding: 4px 6px; border: 1px solid var(--ink); background: #fff; width: 280px; max-width: 100%; }
+  .row { display: flex; flex-wrap: wrap; gap: 14px; }
+  ul.plain { margin: 6px 0 0; padding-left: 20px; }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Deepa's dashboard</h1>
+  <div class="muted">Read-only view for the project sponsor. Nothing here approves a flag or places an order. Raghav and the procurement team decide.</div>
+  <div id="error" class="err" hidden></div>
+
+  <div class="tabs">
+    <button id="tabOverview" class="on">Overview</button>
+    <button id="tabDist">Distributors</button>
+  </div>
+
+  <section id="overview"></section>
+  <section id="dist" hidden></section>
+</main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const fmtDate = (iso) => new Date(iso).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' });
+const inr = (n) => '₹' + Number(n).toLocaleString('en-IN', { maximumFractionDigits: 2 });
+const lakh = (n) => '₹' + (Number(n) / 100000).toLocaleString('en-IN', { maximumFractionDigits: 2 }) + ' L';
+const num = (n) => Number(n).toLocaleString('en-IN', { maximumFractionDigits: 2 });
+const hrs = (h) => (h === null ? '–' : h + ' h');
+
+function showError(msg) { $('error').hidden = !msg; $('error').textContent = msg || ''; }
+async function getJson(path) {
+  const res = await fetch(path);
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(body.error || `Request failed (${res.status})`);
+  return body;
+}
+async function postJson(path, payload) {
+  const res = await fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+  return { ok: res.ok, body: await res.json().catch(() => ({})) };
+}
+const errList = (body) => `<div class="err"><b>Not saved.</b><ul class="plain">${(body.errors || [body.error || 'Something went wrong.']).map((e) => `<li>${esc(e)}</li>`).join('')}</ul></div>`;
+
+// ---------------- Overview ----------------
+let overview = null;
+let quarterNote = '';
+
+async function loadOverview() {
+  showError('');
+  try { overview = await getJson('/api/deepa'); drawOverview(); } catch (e) { showError(e.message); }
+}
+
+const BASELINE = { total: '₹28-34L', stockouts: '₹18-22L', overstock: '₹10-12L' };
+
+function drawOverview() {
+  const o = overview;
+  const runs = o.runs.length ? `<div class="wrap"><table>
+    <tr><th>Run</th><th>By</th><th>Stock as of</th><th class="num">High demand</th><th class="num">Stockout</th><th class="num">Overstock</th><th class="num">Exceptions</th>
+        <th class="num">To review</th><th class="num">Approved</th><th class="num">Overridden</th><th class="num">Not decided</th><th class="num">To first decision</th><th class="num">To last decision</th></tr>
+    ${o.runs.map((r) => `<tr><td>${esc(fmtDate(r.run_at))}</td><td>${esc(r.triggered_by)}</td><td>${esc(r.as_of_date || '–')}</td>
+      <td class="num">${r.flags_by_type.high_demand}</td><td class="num">${r.flags_by_type.stockout_risk}</td><td class="num">${r.flags_by_type.overstock_risk}</td><td class="num">${r.exceptions}</td>
+      <td class="num">${r.lines_to_review}</td><td class="num">${r.approved}</td><td class="num">${r.overridden}</td><td class="num">${r.not_decided}</td>
+      <td class="num">${hrs(r.hours_to_first_decision)}</td><td class="num">${hrs(r.hours_to_last_decision)}</td></tr>`).join('')}
+    </table></div>
+    <p class="muted small">A SKU with two flags counts under both types. An exception with conflicting flags counts under its flag types and under Exceptions. Hours run from the run to the first and last saved decision; changing a decision later moves the last time. Totals only: nobody is named or compared.</p>`
+    : '<div class="empty">No runs yet.</div>';
+
+  const q = o.quarterly.length ? `<div class="wrap"><table>
+    <tr><th>Quarter</th><th class="num">Lost sales</th><th class="num">Write-offs</th><th class="num">Total</th><th>Typed in</th></tr>
+    ${o.quarterly.map((r) => `<tr><td><b>${esc(r.quarter)}</b></td><td class="num">${esc(inr(r.lost_sales_inr))} <span class="muted">(${esc(lakh(r.lost_sales_inr))})</span></td>
+      <td class="num">${esc(inr(r.writeoffs_inr))} <span class="muted">(${esc(lakh(r.writeoffs_inr))})</span></td>
+      <td class="num">${esc(inr(r.lost_sales_inr + r.writeoffs_inr))} <span class="muted">(${esc(lakh(r.lost_sales_inr + r.writeoffs_inr))})</span></td><td>${esc(fmtDate(r.entered_at))}</td></tr>`).join('')}
+    </table></div>` : '<div class="empty">Nothing entered yet. The figures here are only what you type.</div>';
+
+  const settings = o.settings.map((s) => `<li>${esc(s.description)}: <b>${esc(s.value)}</b></li>`).join('');
+
+  $('overview').innerHTML = `
+    <h2>Run history and review activity</h2>${runs}
+
+    <h2>Quarterly results</h2>
+    <p class="muted">Case baseline: about <b>${BASELINE.total}</b> a quarter in total (stockouts ${BASELINE.stockouts}, overstock write-offs ${BASELINE.overstock}). Type your own figures from your records; only what you enter is shown. Use the same quarter definition each time (calendar or financial year).</p>
+    <div class="form">
+      <div class="row">
+        <div><label>Year</label><input type="number" id="qYear" min="2000" max="2100" step="1" placeholder="2026" style="width:110px"></div>
+        <div><label>Quarter</label><select id="qQ" style="width:110px"><option>Q1</option><option>Q2</option><option>Q3</option><option>Q4</option></select></div>
+        <div><label>Lost sales (₹)</label><input type="text" id="qLost" inputmode="decimal" placeholder="e.g. 2000000" style="width:180px"></div>
+        <div><label>Write-offs (₹)</label><input type="text" id="qWo" inputmode="decimal" placeholder="e.g. 1100000" style="width:180px"></div>
+      </div>
+      <div style="margin-top:10px"><button class="primary" id="qSave">Save quarter</button> <span class="muted small">Entering a quarter again replaces what you typed before.</span></div>
+      <div id="qErr"></div>
+    </div>
+    ${quarterNote ? `<div class="empty" style="margin-bottom:10px">${esc(quarterNote)}</div>` : ''}
+    ${q}
+
+    <h2>Active rules and assumptions</h2>
+    <ul class="plain">${settings}
+      <li>Perishable items (High) use the 3 and 4 week limits in place of the 6 and 14 week ones.</li>
+      <li>The festival uplift applies to both the 12-week average and the last 4 weeks, before any check.</li>
+      <li>The 12-week average is the last 12 weeks of sales, including the last 4.</li>
+      <li>Overstock together with stockout or high demand goes to exceptions.</li>
+      <li>A new SKU stays in exceptions until it has 12 weeks of sales.</li>
+      <li>Deactivated SKUs and distributors are never deleted; new runs skip inactive SKUs.</li>
+    </ul>
+    <p class="muted small">These are read-only here. They are assumptions to confirm with Raghav, and with you for the distributor watch.</p>`;
+}
+
+async function saveQuarter() {
+  const year = $('qYear').value.trim();
+  const r = await postJson('/api/deepa', { action: 'quarter', quarter: `${year}-${$('qQ').value}`, lost_sales_inr: $('qLost').value, writeoffs_inr: $('qWo').value });
+  if (!r.ok) { $('qErr').innerHTML = errList(r.body); return; }
+  quarterNote = `Saved ${r.body.quarter}.`;
+  await loadOverview();
+}
+
+// ---------------- Distributors ----------------
+let dist = null;
+let distForm = null; // null, { mode: 'add' } or { mode: 'edit', id }
+let distNote = '';
+
+async function loadDist() {
+  showError('');
+  try { dist = await getJson('/api/distributors'); drawDist(); } catch (e) { showError(e.message); }
+}
+
+function watchHtml() {
+  const w = dist.watch;
+  const head = '<h2>Ordering less</h2>';
+  if (w.state === 'no_data') return `${head}<div class="empty">No distributor-level order data loaded yet</div>`;
+  if (w.state === 'no_full_month') return `${head}<div class="empty">Orders are loaded, but there is no full month yet to compare.</div>`;
+  const intro = `<p class="muted small">Distributors whose latest full month (${esc(w.latest_month)}) of orders is ${esc(w.drop_pct)}% or more below the average of the previous ${esc(w.baseline_months)} months. Order volume is whatever the SAP export measures. This reports a drop that already happened; it does not predict, score or rank. Sorted by name. The ${esc(w.drop_pct)}% is an assumption for you to confirm.</p>`;
+  const table = w.fired.length
+    ? `<div class="wrap"><table><tr><th>Distributor</th><th>Region</th><th>Month</th><th class="num">Order volume</th><th class="num">Previous ${esc(w.baseline_months)}-month average</th><th class="num">Change</th></tr>
+       ${w.fired.map((f) => `<tr><td><b>${esc(f.distributor_name)}</b> <span class="muted">${esc(f.distributor_id)}</span></td><td>${esc(f.region)}</td><td>${esc(f.latest_month)}</td>
+         <td class="num">${esc(num(f.latest_volume))}</td><td class="num">${esc(num(f.previous_average))}</td><td class="num">${esc(f.change_pct.toFixed(1))}%</td></tr>`).join('')}</table></div>`
+    : `<div class="empty">No active distributor is ${esc(w.drop_pct)}% or more below its previous ${esc(w.baseline_months)}-month average in ${esc(w.latest_month)}.</div>`;
+  const ne = w.not_evaluated.length
+    ? `<p class="muted small">Not evaluated: ${w.not_evaluated.map((n) => `${esc(n.distributor_name)} (${esc(n.reason)})`).join('; ')}.</p>` : '';
+  return head + intro + table + ne;
+}
+
+function distFormHtml() {
+  const edit = distForm.mode === 'edit';
+  const d = edit ? dist.distributors.find((x) => x.distributor_id === distForm.id) : { distributor_id: '', distributor_name: '', region: '', status: 'Active' };
+  return `<div class="form"><b>${edit ? 'Edit ' + esc(d.distributor_id) : 'Add a distributor'}</b>
+    <label>Distributor ID ${edit ? '(cannot be changed)' : '(letters, digits, - and _)'}</label><input type="text" id="dId" maxlength="32" value="${esc(d.distributor_id)}" ${edit ? 'disabled' : ''}>
+    <label>Name</label><input type="text" id="dName" maxlength="120" value="${esc(d.distributor_name)}">
+    <label>Region</label><input type="text" id="dRegion" maxlength="60" value="${esc(d.region)}">
+    <label>Status (as in SAP)</label><input type="text" id="dStatus" maxlength="30" value="${esc(d.status)}">
+    <div style="margin-top:10px"><button class="primary" id="dSave">${edit ? 'Save changes' : 'Add distributor'}</button> <button id="dCancel">Cancel</button></div>
+    <div id="dErr"></div></div>`;
+}
+
+function drawDist() {
+  const rows = dist.distributors.map((d) => {
+    const id = esc(d.distributor_id);
+    const act = d.active ? `<button data-ddeact="${id}">Deactivate</button>` : `<button data-dact="${id}">Reactivate</button>`;
+    return `<tr class="${d.active ? '' : 'inactive'}"><td><b>${id}</b></td><td>${esc(d.distributor_name)}</td><td>${esc(d.region)}</td><td>${esc(d.status)}</td>
+      <td>${d.active ? '<span class="badge ok">Active</span>' : '<span class="badge">Inactive</span>'}</td><td class="num">${d.active_skus}</td>
+      <td><button data-dedit="${id}">Edit</button> ${act}</td></tr>`;
+  }).join('');
+  const regions = dist.regions.map((r) => `<tr><td>${esc(r.region)}</td><td class="num">${r.total}</td><td class="num">${r.active}</td></tr>`).join('');
+  $('dist').innerHTML = `
+    ${watchHtml()}
+    <p class="muted small">Reference from the case: onboarding a new distributor costs about ₹1.5-2L, and an average active distributor brings ₹18-25L a year. This page never recommends adding or losing a distributor. That is your decision.</p>
+
+    <h2>Distributors</h2>
+    ${distNote ? `<div class="empty" style="margin-bottom:10px">${esc(distNote)}</div>` : ''}
+    <div class="wrap"><table style="max-width:420px"><tr><th>Region</th><th class="num">Distributors</th><th class="num">Active</th></tr>${regions}</table></div>
+    ${distForm ? distFormHtml() : '<p><button class="primary" id="dAdd">Add a distributor</button></p>'}
+    <div class="wrap"><table><tr><th>ID</th><th>Name</th><th>Region</th><th>Status (SAP)</th><th>State</th><th class="num">Active SKUs</th><th></th></tr>${rows}</table></div>
+    <p class="muted small">Deactivating is never a delete. A distributor with active SKUs cannot be deactivated until those SKUs are moved to another distributor on Raghav's SKUs page. Sorted by name.</p>`;
+}
+
+document.addEventListener('click', async (ev) => {
+  const t = ev.target;
+  if (!(t instanceof HTMLElement)) return;
+  if (t.id === 'qSave') return saveQuarter();
+  if (t.id === 'dAdd') { distForm = { mode: 'add' }; distNote = ''; drawDist(); }
+  else if (t.id === 'dCancel') { distForm = null; drawDist(); }
+  else if (t.dataset.dedit) { distForm = { mode: 'edit', id: t.dataset.dedit }; distNote = ''; drawDist(); }
+  else if (t.dataset.ddeact || t.dataset.dact) {
+    const r = await postJson('/api/distributors', { action: t.dataset.ddeact ? 'deactivate' : 'reactivate', distributor_id: t.dataset.ddeact || t.dataset.dact });
+    distNote = r.ok ? r.body.note : (r.body.errors || [r.body.error]).join(' ');
+    await loadDist();
+  } else if (t.id === 'dSave') {
+    const edit = distForm.mode === 'edit';
+    const r = await postJson('/api/distributors', { action: edit ? 'edit' : 'add', distributor_id: edit ? distForm.id : $('dId').value, distributor_name: $('dName').value, region: $('dRegion').value, status: $('dStatus').value });
+    if (!r.ok) { $('dErr').innerHTML = errList(r.body); return; }
+    distForm = null; distNote = r.body.note;
+    await loadDist();
+  }
+});
+
+function tab(which) {
+  $('overview').hidden = which !== 'overview';
+  $('dist').hidden = which !== 'dist';
+  $('tabOverview').classList.toggle('on', which === 'overview');
+  $('tabDist').classList.toggle('on', which === 'dist');
+  if (which === 'dist') loadDist(); else loadOverview();
+}
+$('tabOverview').addEventListener('click', () => tab('overview'));
+$('tabDist').addEventListener('click', () => tab('dist'));
+
+loadOverview();
+</script>
+</body>
+</html>

@@ -13,6 +13,10 @@
     {
       "source": "/",
       "destination": "/api/page"
+    },
+    {
+      "source": "/deepa",
+      "destination": "/api/page?view=deepa"
     }
   ],
   "crons": [

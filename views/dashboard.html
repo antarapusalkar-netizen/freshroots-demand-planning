@@ -35,6 +35,10 @@
   .form input[type=number] { width: 90px; }
   .form input[type=text] { width: 200px; }
   .err { margin: 10px 0; padding: 8px 12px; border: 1px solid var(--ink); background: #e6c9c0; }
+  tr.inactive td { color: var(--muted); }
+  .skuform { background: var(--panel); border: 1px solid var(--line); padding: 12px 14px; margin: 12px 0; }
+  .skuform label { display: block; margin: 6px 0 2px; font-size: 13px; color: var(--muted); }
+  .skuform input[type=text], .skuform input[type=number], .skuform select { font: inherit; padding: 4px 6px; border: 1px solid var(--ink); background: #fff; width: 280px; max-width: 100%; }
   details { margin-top: 8px; }
   details ul { margin: 6px 0 0; padding-left: 20px; }
   .empty { padding: 14px; background: var(--panel); border: 1px solid var(--line); }
@@ -60,11 +64,13 @@
   <div class="tabs">
     <button id="tabReview" class="on">Review</button>
     <button id="tabApproved">Approved list</button>
+    <button id="tabSkus">SKUs</button>
     <button id="tabUpload">Upload SAP files</button>
   </div>
 
   <section id="review"></section>
   <section id="approved" hidden></section>
+  <section id="skus" hidden></section>
   <section id="upload" hidden></section>
 </main>
 
@@ -274,16 +280,95 @@ $('runNow').addEventListener('click', async () => {
 });
 
 function tab(which) {
-  for (const t of ['review', 'approved', 'upload']) {
+  for (const t of ['review', 'approved', 'skus', 'upload']) {
     $(t).hidden = which !== t;
     $('tab' + t[0].toUpperCase() + t.slice(1)).classList.toggle('on', which === t);
   }
   if (which === 'approved') renderApproved();
+  if (which === 'skus') renderSkus();
   if (which === 'upload') renderUpload();
 }
 $('tabReview').addEventListener('click', () => tab('review'));
 $('tabApproved').addEventListener('click', () => tab('approved'));
+$('tabSkus').addEventListener('click', () => tab('skus'));
 $('tabUpload').addEventListener('click', () => tab('upload'));
+
+// ---- SKUs ----
+let skuData = null;
+let skuForm = null; // null, { mode: 'add' } or { mode: 'edit', id }
+let skuNote = '';
+
+async function renderSkus() {
+  try { skuData = await api('/api/skus'); } catch (e) { showError(e.message); return; }
+  drawSkus();
+}
+
+function skuFormHtml() {
+  const edit = skuForm.mode === 'edit';
+  const s = edit ? skuData.skus.find((x) => x.sku_id === skuForm.id) : { sku_id: '', sku_name: '', category: '', perishability: 'Low', standard_reorder_qty: '', unit_of_measure: '', distributor_id: '' };
+  const opts = skuData.distributors.map((d) => `<option value="${esc(d.distributor_id)}" ${d.distributor_id === s.distributor_id ? 'selected' : ''}>${esc(d.distributor_name)} (${esc(d.distributor_id)})</option>`).join('');
+  return `<div class="skuform">
+    <b>${edit ? 'Edit ' + esc(s.sku_id) : 'Add a SKU'}</b>
+    <label>SKU ID ${edit ? '(cannot be changed)' : '(letters, digits, - and _)'}</label><input type="text" id="kId" maxlength="32" value="${esc(s.sku_id)}" ${edit ? 'disabled' : ''}>
+    <label>Name</label><input type="text" id="kName" maxlength="120" value="${esc(s.sku_name)}">
+    <label>Category</label><input type="text" id="kCat" maxlength="60" value="${esc(s.category)}">
+    <label><input type="checkbox" id="kPer" ${s.perishability === 'High' ? 'checked' : ''}> Perishable (uses the 3 to 4 week stock window)</label>
+    <label>Standard reorder quantity</label><input type="number" id="kQty" min="1" step="1" value="${esc(s.standard_reorder_qty)}">
+    <label>Unit</label><input type="text" id="kUnit" maxlength="20" value="${esc(s.unit_of_measure)}">
+    <label>Distributor</label><select id="kDist"><option value="">Choose…</option>${opts}</select>
+    <div style="margin-top:10px"><button class="primary" id="kSave">${edit ? 'Save changes' : 'Add SKU'}</button> <button id="kCancel">Cancel</button></div>
+    <div id="kErr"></div>
+  </div>`;
+}
+
+function drawSkus() {
+  const rows = skuData.skus.map((s) => {
+    const id = esc(s.sku_id);
+    const act = s.active ? `<button data-skudeact="${id}">Deactivate</button>` : `<button data-skuact="${id}">Reactivate</button>`;
+    const hist = s.weeks_of_sales < 12 ? ` <span class="muted">(${s.weeks_of_sales} wk of sales)</span>` : '';
+    return `<tr class="${s.active ? '' : 'inactive'}"><td><b>${id}</b></td><td>${esc(s.sku_name)}</td><td>${esc(s.category)}</td>
+      <td>${s.perishability === 'High' ? 'Yes' : 'No'}</td><td class="num">${esc(s.standard_reorder_qty)}</td><td>${esc(s.unit_of_measure)}</td>
+      <td>${esc(s.distributor_name || s.distributor_id)}</td>
+      <td>${s.active ? '<span class="badge ok">Active</span>' : '<span class="badge">Inactive</span>'}${hist}</td>
+      <td><button data-skuedit="${id}">Edit</button> ${act}</td></tr>`;
+  }).join('');
+  $('skus').innerHTML = `<h2>SKUs</h2>
+    <p class="muted">Changes apply from the next run. A new SKU appears in the exceptions list until it has 12 weeks of sales. Deactivated SKUs are skipped by new runs and are never deleted.</p>
+    ${skuNote ? `<div class="empty" style="margin-bottom:10px">${esc(skuNote)}</div>` : ''}
+    ${skuForm ? skuFormHtml() : '<p><button class="primary" id="kAdd">Add a SKU</button></p>'}
+    <table><tr><th>SKU</th><th>Name</th><th>Category</th><th>Perishable</th><th>Std qty</th><th>Unit</th><th>Distributor</th><th>Status</th><th></th></tr>${rows}</table>`;
+}
+
+async function skuCall(payload) {
+  const res = await fetch('/api/skus', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+  const body = await res.json().catch(() => ({}));
+  return { ok: res.ok, body };
+}
+
+document.addEventListener('click', async (ev) => {
+  const t = ev.target;
+  if (!(t instanceof HTMLElement)) return;
+  if (t.id === 'kAdd') { skuForm = { mode: 'add' }; skuNote = ''; drawSkus(); }
+  else if (t.id === 'kCancel') { skuForm = null; drawSkus(); }
+  else if (t.dataset.skuedit) { skuForm = { mode: 'edit', id: t.dataset.skuedit }; skuNote = ''; drawSkus(); }
+  else if (t.dataset.skudeact || t.dataset.skuact) {
+    const r = await skuCall({ action: t.dataset.skudeact ? 'deactivate' : 'reactivate', sku_id: t.dataset.skudeact || t.dataset.skuact });
+    skuNote = r.ok ? r.body.note : (r.body.errors || [r.body.error]).join(' ');
+    await renderSkus();
+  } else if (t.id === 'kSave') {
+    const edit = skuForm.mode === 'edit';
+    const r = await skuCall({
+      action: edit ? 'edit' : 'add', sku_id: edit ? skuForm.id : $('kId').value, sku_name: $('kName').value, category: $('kCat').value,
+      perishable: $('kPer').checked, standard_reorder_qty: $('kQty').value, unit_of_measure: $('kUnit').value, distributor_id: $('kDist').value,
+    });
+    if (!r.ok) {
+      $('kErr').innerHTML = `<div class="err"><b>Not saved.</b><ul>${(r.body.errors || [r.body.error || 'Something went wrong.']).map((e) => `<li>${esc(e)}</li>`).join('')}</ul></div>`;
+      return;
+    }
+    skuForm = null; skuNote = r.body.note;
+    await renderSkus();
+  }
+});
 
 // ---- Upload SAP files ----
 let uploadBuilt = false;
