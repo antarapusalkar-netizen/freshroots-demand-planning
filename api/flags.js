@@ -1,5 +1,6 @@
 import { withPool } from '../lib/db.js';
 import { latestRun, flagsForRun } from '../lib/store.js';
+import { lastUpload } from '../lib/upload.js';
 import { zohoState, openOrderLines, attachOrders } from '../lib/orders.js';
 import { requirePassword } from '../lib/auth.js';
 import { safe, sendJson } from '../lib/http.js';
@@ -34,6 +35,7 @@ export default safe(async (req, res) => {
       exceptions,
       zoho,
       unmatched,
+      last_upload: await lastUpload(pool),
     };
   });
   sendJson(res, 200, body);

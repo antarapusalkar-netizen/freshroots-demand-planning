@@ -60,10 +60,12 @@
   <div class="tabs">
     <button id="tabReview" class="on">Review</button>
     <button id="tabApproved">Approved list</button>
+    <button id="tabUpload">Upload SAP files</button>
   </div>
 
   <section id="review"></section>
   <section id="approved" hidden></section>
+  <section id="upload" hidden></section>
 </main>
 
 <script>
@@ -114,6 +116,7 @@ function renderHeader() {
       <span>SKUs checked: <b>${state.skus_checked}</b></span>
       <span>No action: <b>${state.no_action_count}</b></span>
       <span>${zohoLine()}</span>
+      <span>${uploadLine()}</span>
     </div>
     <details><summary>Active assumptions</summary>
       <ul>${settings}
@@ -156,7 +159,9 @@ function rowHtml(f) {
     <td>${esc(f.sku_name)}</td>
     <td>${esc(f.recommended_action ? ACTION[f.recommended_action] : '–')}</td>
     <td class="num">${esc(qty)}</td>
-    <td class="reason">${esc(f.rule_reason)}</td>
+    <td class="reason">${f.ai_reason
+      ? `<div>${esc(f.ai_reason)}</div><div class="muted" style="font-size:12px;margin-top:4px">Calculation: ${esc(f.rule_reason)}</div>`
+      : esc(f.rule_reason)}</td>
     <td>${onOrderCell(f)}</td>
     <td class="state">${stateCell(f)}</td>
     <td>${buttonsCell(f)}</td>
@@ -176,6 +181,12 @@ function zohoLine() {
     return `<b>Zoho sync failed</b>: ${esc(z.message || 'unknown error')}${good}`;
   }
   return `Zoho last synced <b>${esc(fmtDate(z.last_ok_at))}</b>`;
+}
+
+function uploadLine() {
+  const u = state.last_upload;
+  if (!u) return 'Data source: <b>sample data (no SAP upload yet)</b>';
+  return `Last SAP upload: <b>${esc(fmtDate(u.uploaded_at))}</b> (${esc(u.sales_rows)} sales rows, ${esc(u.inventory_rows)} stock rows)`;
 }
 
 function onOrderCell(f) {
@@ -263,14 +274,70 @@ $('runNow').addEventListener('click', async () => {
 });
 
 function tab(which) {
-  $('review').hidden = which !== 'review';
-  $('approved').hidden = which !== 'approved';
-  $('tabReview').classList.toggle('on', which === 'review');
-  $('tabApproved').classList.toggle('on', which === 'approved');
+  for (const t of ['review', 'approved', 'upload']) {
+    $(t).hidden = which !== t;
+    $('tab' + t[0].toUpperCase() + t.slice(1)).classList.toggle('on', which === t);
+  }
   if (which === 'approved') renderApproved();
+  if (which === 'upload') renderUpload();
 }
 $('tabReview').addEventListener('click', () => tab('review'));
 $('tabApproved').addEventListener('click', () => tab('approved'));
+$('tabUpload').addEventListener('click', () => tab('upload'));
+
+// ---- Upload SAP files ----
+let uploadBuilt = false;
+function renderUpload() {
+  if (uploadBuilt) return;
+  uploadBuilt = true;
+  $('upload').innerHTML = `<h2>Upload SAP files</h2>
+    <p class="muted">Choose the export IT sent. Weekly sales are added or corrected by SKU and week. A stock file replaces the whole current stock snapshot. Check first; nothing is saved until you press Load. After loading, press Run now to check every SKU against the new data.</p>
+    <div class="form" style="flex-direction:column;align-items:flex-start;gap:10px">
+      <label>Weekly sales CSV <input type="file" id="fSales" accept=".csv,text/csv"></label>
+      <label>Current stock CSV <input type="file" id="fStock" accept=".csv,text/csv"></label>
+      <label>Upload password <input type="password" id="fPw" autocomplete="off"></label>
+      <div><button id="btnCheck">Check files</button> <button id="btnLoad" class="primary" disabled>Load into app</button></div>
+    </div>
+    <div id="upResult" style="margin-top:12px"></div>`;
+  const reset = () => { $('btnLoad').disabled = true; $('upResult').innerHTML = ''; };
+  for (const id of ['fSales', 'fStock', 'fPw']) $(id).addEventListener('input', reset);
+  $('btnCheck').addEventListener('click', () => uploadCall('check'));
+  $('btnLoad').addEventListener('click', () => uploadCall('load'));
+}
+
+async function uploadCall(mode) {
+  const out = $('upResult');
+  const sales = $('fSales').files[0], stock = $('fStock').files[0];
+  $('btnCheck').disabled = true; $('btnLoad').disabled = true;
+  try {
+    const res = await fetch('/api/upload', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Upload-Password': $('fPw').value },
+      body: JSON.stringify({ mode, sales: sales ? await sales.text() : '', inventory: stock ? await stock.text() : '' }),
+    });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      const list = body.errors || [body.error || `Upload failed (${res.status})`];
+      out.innerHTML = `<div class="err"><b>${mode === 'load' ? 'Nothing was loaded.' : 'Not loaded.'}</b><ul>${list.map((e) => `<li>${esc(e)}</li>`).join('')}</ul></div>`;
+      return;
+    }
+    const s = body.summary, lines = [];
+    if (s.sales_rows) lines.push(`Sales: <b>${s.sales_rows}</b> rows, weeks ${esc(s.weeks_from)} to ${esc(s.weeks_to)}: <b>${s.sales_new}</b> new, <b>${s.sales_corrected}</b> corrected.`);
+    if (s.inventory_rows) lines.push(`Stock: <b>${s.inventory_rows}</b> rows as of ${esc(s.as_of_dates.join(', '))}. This replaces the current stock snapshot.`);
+    if (s.skus_missing_stock.length) lines.push(`<b>No stock row for:</b> ${esc(s.skus_missing_stock.join(', '))}. These SKUs will go to exceptions as missing stock data.`);
+    if (body.loaded) {
+      out.innerHTML = `<div class="empty"><b>Loaded.</b><br>${lines.join('<br>')}<br>Press <b>Run now</b> to check every SKU against this data.</div>`;
+      await load();
+    } else {
+      out.innerHTML = `<div class="empty"><b>Checked, nothing saved yet.</b><br>${lines.join('<br>')}</div>`;
+      $('btnLoad').disabled = false;
+    }
+  } catch (e) {
+    out.innerHTML = `<div class="err">${esc(e.message)}</div>`;
+  } finally {
+    $('btnCheck').disabled = false;
+  }
+}
 
 load();
 </script>

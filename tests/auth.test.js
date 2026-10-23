@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { passwordOk, requirePassword } from '../lib/auth.js';
+import { passwordOk, requirePassword, requireUploadPassword } from '../lib/auth.js';
+import upload from '../api/upload.js';
 import flags from '../api/flags.js';
 import decide from '../api/decide.js';
 import approved from '../api/approved.js';
@@ -78,4 +79,35 @@ test('run: other methods are refused', async () => {
   const res = fakeRes();
   await run({ method: 'DELETE', url: '/api/run', headers: {} }, res);
   assert.equal(res.statusCode, 405);
+});
+
+test('upload password: refused when not set (fails closed, even locally)', () => {
+  const res = fakeRes();
+  assert.equal(requireUploadPassword({ headers: { 'x-upload-password': 'anything' } }, res, {}), false);
+  assert.equal(res.statusCode, 503);
+  assert.match(res.body, /uploads are switched off/);
+});
+test('upload password: wrong or missing is 401, right one passes', () => {
+  const env = { UPLOAD_PASSWORD: 'up-pw' };
+  for (const headers of [{}, { 'x-upload-password': 'nope' }, { authorization: basic('u', 'up-pw') }]) {
+    const res = fakeRes();
+    assert.equal(requireUploadPassword({ headers }, res, env), false);
+    assert.equal(res.statusCode, 401);
+  }
+  assert.equal(requireUploadPassword({ headers: { 'x-upload-password': 'up-pw' } }, fakeRes(), env), true);
+});
+test('upload handler: the site password does not unlock it, and it refuses before touching the database', async () => {
+  await withEnv({ SITE_PASSWORD: 'pw', UPLOAD_PASSWORD: 'up-pw', DATABASE_URL: undefined }, async () => {
+    const res = fakeRes();
+    await upload({ method: 'POST', url: '/api/upload', headers: { authorization: basic('u', 'pw') } }, res);
+    assert.equal(res.statusCode, 401);
+    const get = fakeRes();
+    await upload({ method: 'GET', url: '/api/upload', headers: {} }, get);
+    assert.equal(get.statusCode, 405);
+  });
+  await withEnv({ UPLOAD_PASSWORD: undefined, DATABASE_URL: undefined }, async () => {
+    const res = fakeRes();
+    await upload({ method: 'POST', url: '/api/upload', headers: {} }, res);
+    assert.equal(res.statusCode, 503);
+  });
 });

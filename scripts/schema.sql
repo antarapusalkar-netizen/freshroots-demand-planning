@@ -110,3 +110,12 @@ CREATE TABLE IF NOT EXISTS app_settings (
 INSERT INTO app_settings (key, value, description) VALUES
   ('zoho_open_statuses', 'issued,partially_received', 'Zoho purchase order statuses that count as already on order (comma separated)')
 ON CONFLICT (key) DO NOTHING;
+
+-- Step 6: record of each SAP file upload, so the dashboard can say where the data came from.
+CREATE TABLE IF NOT EXISTS data_uploads (
+  id             serial PRIMARY KEY,
+  uploaded_at    timestamptz NOT NULL DEFAULT now(),
+  sales_rows     integer NOT NULL,
+  sales_new      integer NOT NULL,
+  inventory_rows integer NOT NULL
+);

@@ -2,11 +2,12 @@ import { withPool } from '../lib/db.js';
 import { runRules, latestRun } from '../lib/store.js';
 import { requirePassword } from '../lib/auth.js';
 import { syncZoho } from '../lib/zoho.js';
+import { explainRun } from '../lib/explain.js';
 import { safe, sendJson } from '../lib/http.js';
 
 // Vercel Cron calls this with GET and "Authorization: Bearer <CRON_SECRET>".
 // The dashboard's Run now button calls it with POST (no secret in the browser).
-// A run tries a read-only Zoho sync first, then runs the rules. A failed or missing sync
+// A run tries a read-only Zoho sync first, then runs the rules, then asks OpenAI for plain-language reasons. A failed or missing sync
 // never blocks the run, and orders never change a flag. A run places no orders.
 export default safe(async (req, res) => {
   let triggeredBy;
@@ -38,7 +39,9 @@ export default safe(async (req, res) => {
       zoho = { state: 'failed', message: 'Zoho sync could not run.' };
     }
     const runId = await runRules(pool, triggeredBy);
-    return { run_id: runId, triggered_by: triggeredBy, zoho };
+    // Plain-language reasons from OpenAI. They never change a flag, and a failure changes nothing.
+    const ai = await explainRun(pool, runId);
+    return { run_id: runId, triggered_by: triggeredBy, zoho, ai };
   });
   sendJson(res, 200, out);
 });
