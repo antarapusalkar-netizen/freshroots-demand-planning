@@ -233,3 +233,17 @@ test('open orders never change a flag: the rules engine has no way to see them',
     assert.ok(!/purchase_orders|orders/.test(readFileSync(new URL(`../lib/${f}`, import.meta.url), 'utf8').replace(/\/\/.*$/gm, '')), `${f} must not read orders`);
   }
 });
+
+test('delivery date: a real purchase order has delivery_date filled and expected_delivery_date empty', async () => {
+  const realShape = [
+    { purchaseorder_id: 'p1', purchaseorder_number: 'PO-00001', status: 'issued', expected_delivery_date: '', delivery_date: '2026-11-09', line_items: [{ line_item_id: 'l1', item_id: 'i1', quantity: 500, quantity_received: 0 }] },
+    { purchaseorder_id: 'p2', purchaseorder_number: 'PO-00002', status: 'issued', expected_delivery_date: '2026-11-20', delivery_date: '2026-11-09', line_items: [{ line_item_id: 'l2', item_id: 'i2', quantity: 5 }] },
+    { purchaseorder_id: 'p3', purchaseorder_number: 'PO-00003', status: 'issued', expected_delivery_date: '', delivery_date: '', line_items: [{ line_item_id: 'l3', item_id: 'i3', quantity: 5 }] },
+  ];
+  const { fetchFn } = mockZoho({ pos: realShape, items });
+  const { rows } = await pullOpenOrders(cfg, 'tok', { openStatuses: OPEN, knownSkuIds: KNOWN }, fetchFn);
+  const due = Object.fromEntries(rows.map((r) => [r.po_number, r.expected_date]));
+  assert.equal(due['PO-00001'], '2026-11-09'); // taken from delivery_date
+  assert.equal(due['PO-00002'], '2026-11-20'); // expected_delivery_date wins when it holds a date
+  assert.equal(due['PO-00003'], null);          // no date anywhere: stays unknown, not invented
+});
